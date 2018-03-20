@@ -1,0 +1,66 @@
+- hosts: websrv
+  remote_user: admin
+  tasks:
+    - name: add group
+      group: name={{ item.name }} gid={{ item.gid }} state=present
+      with_items:
+        - { name: 'admin',  gid: '200' }
+        - { name: 'itsm',   gid: '800' }
+    - name: add user
+      user: name={{ item.name }} groups={{ item.group }},wheel  append=yes uid={{ item.uid }} state=present password={{ item.ups }} update_password=always
+      with_items:
+        - { name: 'admin',  uid: '200', group: 'admin', ups: '$6$rounds=656000$CkaKQ6rR23qpFjq9$GWlb4ybLNGRfoqcJH4BGFs1e4C0ZzzbUq/R2cWs1N6Jlg0S9BAQOREUFaT7ZOQVggKjzgVeBzrTeV5H.eE7lA1' }
+        - { name: 'itsm',   uid: '800', group: 'itsm',  ups: '$6$rounds=656000$DIJshpNDU9Ho73qQ$PJq0Jnsuj.Iy/1CJK9C.dPNYpsaO5tsXD9UdPzXgl6iu3gQ6c/9o/gXMir7j4HmQSV5baGX0c3410u.4UJa5i1' }
+      tags:
+        - temp
+    - name: setting passwd
+      shell: echo {{ item.name }}|passwd --stdin {{ item.name }}
+      with_items:
+        - { name: 'admin' }
+        - { name: 'itsm'  }
+    - name: disable crtl+alt+del
+      shell: systemctl mask ctrl-alt-del.target
+    - name: setting history and timeout
+      copy: src=profile dest=/etc/profile owner=root group=root mode=644
+      notify:
+        - reload profile
+    - name: error login deny
+      copy: src=password-auth-ac dest=/etc/pam.d/password-auth-ac owner=root group=root mode=644
+    - name: root login ssh
+      copy: src=sshd_config dest=/etc/ssh/sshd_config owner=root group=root mode=600
+      notify:
+        - restart ssh
+    - name: keep log 12 week
+      copy: src=logrotate.conf dest=/etc/logrotate.conf owner=root group=root mode=644
+    - name: config sudoer
+      copy: src={{ item.name }} dest={{ item.path}} owner=root group=root mode={{ item.mode }}
+      with_items:
+        - { name: 'sudoers',  path: '/etc/sudoers',  mode: '440' }
+        - { name: 'su',       path: '/etc/pam.d/su', mode: '644' }
+    - name: limit open file
+      copy: src=limits.conf dest=/etc/security/limits.conf owner=root group=root mode=644
+    - name: disable ipv6
+      copy: src=net.conf dest=/etc/sysctl.d/net.conf owner=root group=root mode=644
+      notify:
+        - kernel parameter
+    - name: disable service
+      service: name={{ item }}  enabled=false state=stopped
+      with_items:
+        - postfix.service
+        - libvirtd.service
+        - firewalld.service
+        - cups.service
+        - avahi-daemon.service
+    - name: diable selinux
+      copy: src=config dest=/etc/selinux/config owner=root group=root mode=644
+    - name: passwd policy
+      copy: src=system-auth-ac dest=/etc/pam.d/system-auth-ac owner=root group=root mode=644
+      tags:
+        - pass
+  handlers:
+    - name: reload profile
+      shell: source /etc/profile
+    - name: restart ssh
+      shell: systemctl restart sshd
+    - name: kernel parameter
+      shell: sysctl -p;systemctl restart network
